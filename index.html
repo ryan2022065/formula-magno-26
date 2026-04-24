@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <title>Fórmula Magno 26 - Pro Simulator</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
+        #info { position: absolute; top: 10px; width: 100%; text-align: center; z-index: 100; pointer-events: none; }
+        #speedometer { position: absolute; bottom: 20px; right: 20px; font-size: 2em; font-family: monospace; color: #e10600; }
+    </style>
+</head>
+
+<body>
+    <div id="info">
+        <h1 style="font-style: italic;">FÓRMULA MAGNO 26</h1>
+        <p>WSAD para dirigir | SETA CIMA: Acelerar | SETA BAIXO: Frear</p>
+    </div>
+    <div id="speedometer">0 KM/H</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+        let camera, scene, renderer, car;
+        let speed = 0, angle = 0;
+        const wheels = [];
+
+        // Teclas de controle
+        const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false };
+
+        const tireSettings = {
+            'Médio': { grip: 1.0, top: 1.2 }
+        };
+
+        function init() {
+            // Cena e Câmera
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x333333);
+            scene.fog = new THREE.Fog(0x333333, 15, 50);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            document.body.appendChild(renderer.domElement);
+
+            // Luzes Realistas
+            const light = new THREE.DirectionalLight(0xffffff, 2);
+            light.position.set(5, 15, 5);
+            scene.add(light);
+            scene.add(new THREE.AmbientLight(0x404040, 1));
+
+            // Grid (Chão temporário)
+            const grid = new THREE.GridHelper(200, 40, 0xffffff, 0x555555);
+            scene.add(grid);
+
+            // --- CARREGADOR DO MODELO 3D ---
+            const dracoLoader = new DRACOLoader();
+            dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+
+            const loader = new GLTFLoader();
+            loader.setDRACOLoader(dracoLoader);
+
+            // Carrega o seu arquivo "carro.glb"
+            loader.load('carro.glb', (gltf) => {
+                car = gltf.scene;
+                
+                // Ajuste de escala e posição se necessário
+                // car.scale.set(1.5, 1.5, 1.5); 
+                
+                car.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        // Tenta aplicar a cor vermelha de F1 se a peça for o corpo
+                        if (child.name.includes("body")) {
+                            child.material.color.set(0xe10600);
+                        }
+                    }
+                });
+
+                scene.add(car);
+                console.log("Carro de F1 Carregado!");
+            }, 
+            (xhr) => { console.log((xhr.loaded / xhr.total * 100) + '% carregado'); },
+            (error) => {
+                console.error("Arquivo carro.glb não encontrado. Criando modelo reserva.");
+                createPlaceholder();
+            });
+
+            // Eventos de teclado
+            window.addEventListener('keydown', (e) => { if(keys.hasOwnProperty(e.key)) keys[e.key] = true; });
+            window.addEventListener('keyup', (e) => { if(keys.hasOwnProperty(e.key)) keys[e.key] = false; });
+
+            animate();
+        }
+
+        function createPlaceholder() {
+            const body = new THREE.Mesh(
+                new THREE.BoxGeometry(1.5, 0.5, 4),
+                new THREE.MeshStandardMaterial({ color: 0xe10600 })
+            );
+            car = new THREE.Group();
+            car.add(body);
+            scene.add(car);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (car) {
+                // Aceleração (W ou Seta Cima)
+                if (keys.w || keys.ArrowUp) {
+                    speed += 0.008 * tireSettings['Médio'].grip;
+                } 
+                // Freio (Seta Baixo)
+                else if (keys.ArrowDown) {
+                    speed -= 0.02;
+                }
+                // Ré (S)
+                else if (keys.s) {
+                    speed -= 0.005;
+                }
+                else {
+                    speed *= 0.98; // Atrito
+                }
+
+                // Limites
+                if (speed > 1.5) speed = 1.5;
+                if (speed < -0.2) speed = -0.2;
+
+                // Direção (A e D)
+                if (Math.abs(speed) > 0.01) {
+                    const steer = 0.04;
+                    if (keys.a) angle += steer;
+                    if (keys.d) angle -= steer;
+                }
+
+                // Aplicar movimento
+                car.rotation.y = angle;
+                car.position.x += Math.sin(angle) * speed;
+                car.position.z += Math.cos(angle) * speed;
+
+                // Câmera Profissional (Seguindo o carro)
+                const camOffset = new THREE.Vector3(0, 2, -6).applyQuaternion(car.quaternion);
+                camera.position.lerp(car.position.clone().add(camOffset), 0.1);
+                camera.lookAt(car.position);
+
+                // Velocímetro
+                document.getElementById('speedometer').innerText = `${Math.floor(speed * 220)} KM/H`;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        init();
+    </script>
+</body>
+</html>
