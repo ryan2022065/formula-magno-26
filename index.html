@@ -153,10 +153,14 @@
                 car.position.x += Math.sin(angle) * speed;
                 car.position.z += Math.cos(angle) * speed;
 
-                // Câmera Profissional (Seguindo o carro)
-                const camOffset = new THREE.Vector3(0, 2, -6).applyQuaternion(car.quaternion);
-                camera.position.lerp(car.position.clone().add(camOffset), 0.1);
-                camera.lookAt(car.position);
+               // --- NOVA LÓGICA DE COCKPIT ---
+                // Ajuste os números (0, 0.7, 0.4) para alinhar com o capacete do seu modelo 3D
+                const cockpitOffset = new THREE.Vector3(0, 0.7, 0.4).applyQuaternion(car.quaternion);
+                camera.position.copy(car.position).add(cockpitOffset);
+
+                // Faz a câmera olhar para a frente do bico do carro
+                const lookTarget = new THREE.Vector3(0, 0.6, 5).applyQuaternion(car.quaternion);
+                camera.lookAt(car.position.clone().add(lookTarget));
 
                 // Velocímetro
                 document.getElementById('speedometer').innerText = `${Math.floor(speed * 220)} KM/H`;
