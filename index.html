@@ -130,16 +130,22 @@
                 car.position.x += Math.sin(angle) * speed;
                 car.position.z += Math.cos(angle) * speed;
 
-                // LÓGICA DE CÂMERA
-                if (cameraMode === 'cockpit') {
-                    const cockpitOffset = new THREE.Vector3(0, 0.85, 0.1).applyQuaternion(car.quaternion);
-                    camera.position.copy(car.position).add(cockpitOffset);
-                    camera.lookAt(car.position.clone().add(new THREE.Vector3(0, 0.5, 5).applyQuaternion(car.quaternion)));
-                } else {
-                    const wingOffset = new THREE.Vector3(0, 1.4, -3.5).applyQuaternion(car.quaternion);
-                    camera.position.copy(car.position).add(wingOffset);
-                    camera.lookAt(car.position.clone().add(new THREE.Vector3(0, 0, 5).applyQuaternion(car.quaternion)));
-                }
+             // ESCOLHA DA CÂMERA ATIVA
+        if (cameraMode === 'cockpit') {
+            // Visão T-Cam (Em cima do capacete)
+            // Aumentamos o 0.85 para 1.1 para subir a visão
+            const cockpitOffset = new THREE.Vector3(0, 1.1, -0.2).applyQuaternion(car.quaternion);
+            camera.position.copy(car.position).add(cockpitOffset);
+            
+            // Faz a câmera olhar mais para baixo e para frente
+            const lookTarget = new THREE.Vector3(0, 0.5, 5).applyQuaternion(car.quaternion);
+            camera.lookAt(car.position.clone().add(lookTarget));
+        } else {
+            // Visão Asa Traseira (Ficando atrás do aerofólio)
+            const wingOffset = new THREE.Vector3(0, 1.6, -4.5).applyQuaternion(car.quaternion);
+            camera.position.copy(car.position).add(wingOffset);
+            camera.lookAt(car.position);
+        }
 
                 document.getElementById('speedometer').innerText = `${Math.floor(speed * 220)} KM/H`;
             }
