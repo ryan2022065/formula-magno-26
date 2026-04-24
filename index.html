@@ -14,7 +14,7 @@
 <body>
     <div id="info">
         <h1 style="font-style: italic;">FÓRMULA MAGNO 26</h1>
-        <p>WSAD para dirigir | SETA CIMA: Acelerar | SETA BAIXO: Frear | Tecla C: Mudar Câmera</p>
+        <p>WSAD para dirigir | C: Mudar Câmera</p>
     </div>
     <div id="speedometer">0 KM/H</div>
 
@@ -22,7 +22,8 @@
         {
             "imports": {
                 "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "three-mesh-bvh": "https://unpkg.com/three-mesh-bvh@0.6.8/build/index.module.js"
             }
         }
     </script>
@@ -31,34 +32,29 @@
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+        import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 
-        let camera, scene, renderer, car;
+        // Ativar extensões de física
+        THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+        THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+        THREE.Mesh.prototype.raycast = acceleratedRaycast;
+
+        let camera, scene, renderer, car, trackMesh;
         let speed = 0, angle = 0;
         let cameraMode = 'cockpit'; 
-        const wheels = [];
-
         const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false };
-
-        const tireSettings = {
-            'Médio': { grip: 1.0, top: 1.2 }
-        };
 
         function init() {
             scene = new THREE.Scene();
-            // Cor do céu e neblina ajustadas para a pista
             scene.background = new THREE.Color(0x87CEEB); 
             scene.fog = new THREE.Fog(0x87CEEB, 50, 1000);
 
             camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
-
             renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            renderer.outputColorSpace = THREE.SRGBColorSpace;
             document.body.appendChild(renderer.domElement);
 
-            // Luzes aprimoradas para o cenário
             const sunLight = new THREE.DirectionalLight(0xffffff, 3);
             sunLight.position.set(10, 50, 10);
             scene.add(sunLight);
@@ -66,43 +62,26 @@
 
             const dracoLoader = new DRACOLoader();
             dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-
             const loader = new GLTFLoader();
             loader.setDRACOLoader(dracoLoader);
 
-            // --- CARREGADOR DA PISTA DO JAPÃO ---
+            // Carregar Pista com Física
             loader.load('japan.glb', (gltf) => {
                 const track = gltf.scene;
-                track.scale.set(1, 1, 1); 
                 track.traverse((child) => {
                     if (child.isMesh) {
-                        child.receiveShadow = true;
-                        if(child.material) child.material.side = THREE.DoubleSide;
+                        child.geometry.computeBoundsTree(); // Cria a "caixa de colisão"
+                        trackMesh = child; // Guarda a referência para a física
                     }
                 });
                 scene.add(track);
-                console.log("Pista do Japão carregada!");
             });
 
-            // --- CARREGADOR DO CARRO ---
+            // Carregar Carro
             loader.load('carro.glb', (gltf) => {
                 car = gltf.scene;
-                car.traverse((child) => {
-                    if (child.isMesh) {
-                        child.castShadow = true;
-                        if (child.name.toLowerCase().includes("body")) {
-                            child.material.color.set(0xe10600);
-                        }
-                    }
-                });
-                // Posicionando o carro um pouco acima para não bugar no asfalto
-                car.position.set(0, 0.1, 0); 
+                car.position.set(0, 2, 0); // Começa um pouco no ar para cair na pista
                 scene.add(car);
-            }, 
-            (xhr) => { console.log('Carro: ' + (xhr.loaded / xhr.total * 100) + '%'); },
-            (error) => {
-                console.error("Erro no carro. Criando reserva.");
-                createPlaceholder();
             });
 
             window.addEventListener('keydown', (e) => { if(e.key in keys) keys[e.key] = true; });
@@ -111,69 +90,70 @@
             animate();
         }
 
-        function createPlaceholder() {
-            const body = new THREE.Mesh(
-                new THREE.BoxGeometry(1.5, 0.5, 4),
-                new THREE.MeshStandardMaterial({ color: 0xe10600 })
-            );
-            car = new THREE.Group();
-            car.add(body);
-            scene.add(car);
+        function updatePhysics() {
+            if (!car || !trackMesh) return;
+
+            // Raycaster: Um "laser" que aponta para baixo do carro para achar o chão
+            const raycaster = new THREE.Raycaster();
+            raycaster.firstHitOnly = true;
+            raycaster.set(new THREE.Vector3(car.position.x, car.position.y + 1, car.position.z), new THREE.Vector3(0, -1, 0));
+
+            const hit = raycaster.intersectObject(trackMesh);
+
+            if (hit.length > 0) {
+                const groundY = hit[0].point.y;
+                // Se o carro estiver abaixo do chão ou muito perto, ele gruda no asfalto
+                if (car.position.y < groundY + 0.1) {
+                    car.position.y = groundY + 0.1;
+                } else {
+                    car.position.y -= 0.1; // Gravidade simples
+                }
+            } else {
+                car.position.y -= 0.2; // Queda livre se sair da pista
+            }
         }
 
         function animate() {
             requestAnimationFrame(animate);
 
             if (car) {
-                if (keys.w || keys.ArrowUp) speed += 0.008 * tireSettings['Médio'].grip;
-                else if (keys.ArrowDown) speed -= 0.02;
-                else if (keys.s) speed -= 0.005;
+                // Controles de movimento
+                if (keys.w || keys.ArrowUp) speed += 0.008;
+                else if (keys.ArrowDown || keys.s) speed -= 0.01;
                 else speed *= 0.98;
 
                 if (speed > 1.5) speed = 1.5;
                 if (speed < -0.2) speed = -0.2;
 
                 if (Math.abs(speed) > 0.01) {
-                    const steer = 0.04;
-                    if (keys.a) angle += steer;
-                    if (keys.d) angle -= steer;
+                    if (keys.a) angle += 0.04;
+                    if (keys.d) angle -= 0.04;
                 }
 
                 car.rotation.y = angle;
                 car.position.x += Math.sin(angle) * speed;
                 car.position.z += Math.cos(angle) * speed;
 
+                updatePhysics(); // Chama a função de colisão
+
+                // Câmeras
                 if (cameraMode === 'cockpit') {
-                    // Visão T-Cam (Topo do Cockpit)
                     const cockpitOffset = new THREE.Vector3(0, 1.1, -0.2).applyQuaternion(car.quaternion);
                     camera.position.copy(car.position).add(cockpitOffset);
-                    const lookTarget = new THREE.Vector3(0, 0.5, 5).applyQuaternion(car.quaternion);
-                    camera.lookAt(car.position.clone().add(lookTarget));
+                    camera.lookAt(car.position.clone().add(new THREE.Vector3(0, 0.5, 5).applyQuaternion(car.quaternion)));
                 } else {
-                    // Visão Asa Traseira
                     const wingOffset = new THREE.Vector3(0, 1.6, -4.5).applyQuaternion(car.quaternion);
                     camera.position.copy(car.position).add(wingOffset);
-                    camera.lookAt(car.position.clone().add(new THREE.Vector3(0, 1.0, 2).applyQuaternion(car.quaternion)));
+                    camera.lookAt(car.position);
                 }
 
                 document.getElementById('speedometer').innerText = `${Math.floor(speed * 220)} KM/H`;
             }
-
             renderer.render(scene, camera);
         }
 
-        window.addEventListener('resize', () => {
-            if (camera && renderer) {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
-            }
-        });
-
         window.addEventListener('keydown', (e) => {
-            if (e.key.toLowerCase() === 'c') {
-                cameraMode = (cameraMode === 'cockpit') ? 'wing' : 'cockpit';
-            }
+            if (e.key.toLowerCase() === 'c') cameraMode = (cameraMode === 'cockpit') ? 'wing' : 'cockpit';
         });
 
         init();
