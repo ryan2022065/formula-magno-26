@@ -8,14 +8,16 @@
         body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
         #info { position: absolute; top: 10px; width: 100%; text-align: center; z-index: 100; pointer-events: none; }
         #speedometer { position: absolute; bottom: 20px; right: 20px; font-size: 2em; font-family: monospace; color: #e10600; }
+        #gps { position: absolute; top: 10px; left: 10px; font-family: monospace; font-size: 12px; color: #fff; background: rgba(0,0,0,0.5); padding: 5px; }
     </style>
 </head>
 
 <body>
     <div id="info">
         <h1 style="font-style: italic;">FÓRMULA MAGNO 26</h1>
-        <p>WSAD para dirigir | C: Mudar Câmera | R: Resetar Carro</p>
+        <p>WSAD para dirigir | C: Mudar Câmera | R: Resetar</p>
     </div>
+    <div id="gps">Aguardando GPS...</div>
     <div id="speedometer">0 KM/H</div>
 
     <script type="importmap">
@@ -38,27 +40,27 @@
         THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
         THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-        let camera, scene, renderer, car, trackMesh;
+        let camera, scene, renderer, car;
         let speed = 0, angle = 0;
         let cameraMode = 'cockpit'; 
         const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false };
 
-        // --- CONFIGURAÇÃO DO SPAWNPOINT ---
-        const spawnPoint = new THREE.Vector3(50, 10, 50); 
+        // --- AJUSTE O SPAWNPOINT AQUI DEPOIS DE USAR O GPS ---
+        const spawnPoint = new THREE.Vector3(0, 10, 0); 
 
         function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x87CEEB); 
-            scene.fog = new THREE.Fog(0x87CEEB, 50, 1500);
+            scene.fog = new THREE.Fog(0x87CEEB, 50, 2000);
 
-            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 3000);
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 4000);
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
             document.body.appendChild(renderer.domElement);
 
             const sunLight = new THREE.DirectionalLight(0xffffff, 3);
-            sunLight.position.set(100, 200, 100);
+            sunLight.position.set(100, 300, 100);
             scene.add(sunLight);
             scene.add(new THREE.AmbientLight(0xffffff, 0.8));
 
@@ -70,23 +72,20 @@
             loader.load('japan.glb', (gltf) => {
                 const track = gltf.scene;
                 track.traverse((child) => {
-                    if (child.isMesh) {
-                        child.geometry.computeBoundsTree();
-                        trackMesh = child;
-                    }
+                    if (child.isMesh) child.geometry.computeBoundsTree();
                 });
                 scene.add(track);
             });
 
             loader.load('carro.glb', (gltf) => {
                 car = gltf.scene;
-                resetCar(); // Usa o spawnpoint ao carregar
+                resetCar();
                 scene.add(car);
             });
 
             window.addEventListener('keydown', (e) => { 
                 if(e.key in keys) keys[e.key] = true; 
-                if(e.key.toLowerCase() === 'r') resetCar(); // Tecla R para resetar
+                if(e.key.toLowerCase() === 'r') resetCar(); 
             });
             window.addEventListener('keyup', (e) => { if(e.key in keys) keys[e.key] = false; });
 
@@ -102,31 +101,36 @@
             }
         }
 
+        // Função para ignorar o próprio carro na colisão
+        function isChildOf(object, parent) {
+            while (object !== null) {
+                if (object === parent) return true;
+                object = object.parent;
+            }
+            return false;
+        }
+
         function updatePhysics() {
-            if (!car || !trackMesh) return;
+            if (!car) return;
 
             const raycaster = new THREE.Raycaster();
-            raycaster.firstHitOnly = true;
-            // Laser maior para detectar o chão de mais alto
             raycaster.set(new THREE.Vector3(car.position.x, car.position.y + 2, car.position.z), new THREE.Vector3(0, -1, 0));
 
-            const hit = raycaster.intersectObject(trackMesh);
+            const intersects = raycaster.intersectObjects(scene.children, true);
+            const hit = intersects.find(intersect => !isChildOf(intersect.object, car));
 
-            if (hit.length > 0) {
-                const groundY = hit[0].point.y;
+            if (hit) {
+                const groundY = hit.point.y;
                 if (car.position.y < groundY + 0.1) {
                     car.position.y = groundY + 0.1;
                 } else {
-                    car.position.y -= 0.2; // Gravidade
+                    car.position.y -= 0.15;
                 }
             } else {
-                car.position.y -= 0.5; // Queda livre
+                car.position.y -= 0.5;
             }
 
-            // --- SISTEMA ANTI-LIMBO ---
-            if (car.position.y < -30) {
-                resetCar();
-            }
+            if (car.position.y < -50) resetCar();
         }
 
         function animate() {
@@ -137,8 +141,8 @@
                 else if (keys.ArrowDown || keys.s) speed -= 0.02;
                 else speed *= 0.97;
 
-                if (speed > 1.8) speed = 1.8;
-                if (speed < -0.3) speed = -0.3;
+                if (speed > 2.0) speed = 2.0;
+                if (speed < -0.4) speed = -0.4;
 
                 if (Math.abs(speed) > 0.01) {
                     const steer = 0.04;
@@ -152,6 +156,9 @@
 
                 updatePhysics();
 
+                // MOSTRA GPS NA TELA
+                document.getElementById('gps').innerText = `GPS - X: ${Math.floor(car.position.x)} | Z: ${Math.floor(car.position.z)}`;
+
                 if (cameraMode === 'cockpit') {
                     const cockpitOffset = new THREE.Vector3(0, 1.1, -0.2).applyQuaternion(car.quaternion);
                     camera.position.copy(car.position).add(cockpitOffset);
@@ -162,7 +169,7 @@
                     camera.lookAt(car.position);
                 }
 
-                document.getElementById('speedometer').innerText = `${Math.floor(speed * 180)} KM/H`;
+                document.getElementById('speedometer').innerText = `${Math.floor(speed * 150)} KM/H`;
             }
             renderer.render(scene, camera);
         }
