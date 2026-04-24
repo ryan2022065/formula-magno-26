@@ -14,7 +14,7 @@
 <body>
     <div id="info">
         <h1 style="font-style: italic;">FÓRMULA MAGNO 26</h1>
-        <p>WSAD para dirigir | SETA CIMA: Acelerar | SETA BAIXO: Frear</p>
+        <p>WSAD para dirigir | SETA CIMA: Acelerar | SETA BAIXO: Frear | Tecla C: Mudar Câmera</p>
     </div>
     <div id="speedometer">0 KM/H</div>
 
@@ -34,9 +34,9 @@
 
         let camera, scene, renderer, car;
         let speed = 0, angle = 0;
+        let cameraMode = 'cockpit'; 
         const wheels = [];
 
-        // Teclas de controle
         const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false };
 
         const tireSettings = {
@@ -44,7 +44,6 @@
         };
 
         function init() {
-            // Cena e Câmera
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x333333);
             scene.fog = new THREE.Fog(0x333333, 15, 50);
@@ -57,52 +56,44 @@
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
             document.body.appendChild(renderer.domElement);
 
-            // Luzes Realistas
             const light = new THREE.DirectionalLight(0xffffff, 2);
             light.position.set(5, 15, 5);
             scene.add(light);
             scene.add(new THREE.AmbientLight(0x404040, 1));
 
-            // Grid (Chão temporário)
             const grid = new THREE.GridHelper(200, 40, 0xffffff, 0x555555);
             scene.add(grid);
 
-            // --- CARREGADOR DO MODELO 3D ---
             const dracoLoader = new DRACOLoader();
             dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 
             const loader = new GLTFLoader();
             loader.setDRACOLoader(dracoLoader);
 
-            // Carrega o seu arquivo "carro.glb"
             loader.load('carro.glb', (gltf) => {
                 car = gltf.scene;
-                
-                // Ajuste de escala e posição se necessário
-                // car.scale.set(1.5, 1.5, 1.5); 
+                // 🛠️ AJUSTE DE ESCALA: Se o carro estiver gigante ou invisível, use:
+                // car.scale.set(0.5, 0.5, 0.5); 
                 
                 car.traverse((child) => {
                     if (child.isMesh) {
                         child.castShadow = true;
-                        // Tenta aplicar a cor vermelha de F1 se a peça for o corpo
-                        if (child.name.includes("body")) {
+                        if (child.name.toLowerCase().includes("body")) {
                             child.material.color.set(0xe10600);
                         }
                     }
                 });
-
                 scene.add(car);
-                console.log("Carro de F1 Carregado!");
             }, 
             (xhr) => { console.log((xhr.loaded / xhr.total * 100) + '% carregado'); },
             (error) => {
-                console.error("Arquivo carro.glb não encontrado. Criando modelo reserva.");
+                console.error("Erro ao carregar o modelo. Criando reserva.");
                 createPlaceholder();
             });
 
-            // Eventos de teclado
-            window.addEventListener('keydown', (e) => { if(keys.hasOwnProperty(e.key)) keys[e.key] = true; });
-            window.addEventListener('keyup', (e) => { if(keys.hasOwnProperty(e.key)) keys[e.key] = false; });
+            // 🛠️ AJUSTE NOS EVENTOS: Garantindo que as teclas funcionem corretamente
+            window.addEventListener('keydown', (e) => { if(e.key in keys) keys[e.key] = true; });
+            window.addEventListener('keyup', (e) => { if(e.key in keys) keys[e.key] = false; });
 
             animate();
         }
@@ -121,48 +112,35 @@
             requestAnimationFrame(animate);
 
             if (car) {
-                // Aceleração (W ou Seta Cima)
-                if (keys.w || keys.ArrowUp) {
-                    speed += 0.008 * tireSettings['Médio'].grip;
-                } 
-                // Freio (Seta Baixo)
-                else if (keys.ArrowDown) {
-                    speed -= 0.02;
-                }
-                // Ré (S)
-                else if (keys.s) {
-                    speed -= 0.005;
-                }
-                else {
-                    speed *= 0.98; // Atrito
-                }
+                if (keys.w || keys.ArrowUp) speed += 0.008 * tireSettings['Médio'].grip;
+                else if (keys.ArrowDown) speed -= 0.02;
+                else if (keys.s) speed -= 0.005;
+                else speed *= 0.98;
 
-                // Limites
                 if (speed > 1.5) speed = 1.5;
                 if (speed < -0.2) speed = -0.2;
 
-                // Direção (A e D)
                 if (Math.abs(speed) > 0.01) {
                     const steer = 0.04;
                     if (keys.a) angle += steer;
                     if (keys.d) angle -= steer;
                 }
 
-                // Aplicar movimento
                 car.rotation.y = angle;
                 car.position.x += Math.sin(angle) * speed;
                 car.position.z += Math.cos(angle) * speed;
 
-               // --- NOVA LÓGICA DE COCKPIT ---
-                // Ajuste os números (0, 0.7, 0.4) para alinhar com o capacete do seu modelo 3D
-                const cockpitOffset = new THREE.Vector3(0, 0.7, 0.4).applyQuaternion(car.quaternion);
-                camera.position.copy(car.position).add(cockpitOffset);
+                // LÓGICA DE CÂMERA
+                if (cameraMode === 'cockpit') {
+                    const cockpitOffset = new THREE.Vector3(0, 0.85, 0.1).applyQuaternion(car.quaternion);
+                    camera.position.copy(car.position).add(cockpitOffset);
+                    camera.lookAt(car.position.clone().add(new THREE.Vector3(0, 0.5, 5).applyQuaternion(car.quaternion)));
+                } else {
+                    const wingOffset = new THREE.Vector3(0, 1.4, -3.5).applyQuaternion(car.quaternion);
+                    camera.position.copy(car.position).add(wingOffset);
+                    camera.lookAt(car.position.clone().add(new THREE.Vector3(0, 0, 5).applyQuaternion(car.quaternion)));
+                }
 
-                // Faz a câmera olhar para a frente do bico do carro
-                const lookTarget = new THREE.Vector3(0, 0.6, 5).applyQuaternion(car.quaternion);
-                camera.lookAt(car.position.clone().add(lookTarget));
-
-                // Velocímetro
                 document.getElementById('speedometer').innerText = `${Math.floor(speed * 220)} KM/H`;
             }
 
@@ -170,9 +148,17 @@
         }
 
         window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            if (camera && renderer) {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'c') {
+                cameraMode = (cameraMode === 'cockpit') ? 'wing' : 'cockpit';
+            }
         });
 
         init();
