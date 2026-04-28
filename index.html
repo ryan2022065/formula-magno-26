@@ -77,52 +77,63 @@
             }
         }
 
-        function updatePhysics() {
-            if (!car || !trackMesh) return;
+     function updatePhysics() {
+            if (!car || !scene) return;
 
-            // --- CHÃO (GRAVIDADE) ---
+            // 1. LASER DO CHÃO (Para não cair)
             const groundRay = new THREE.Raycaster();
             groundRay.set(new THREE.Vector3(car.position.x, car.position.y + 2, car.position.z), new THREE.Vector3(0, -1, 0));
-            const groundHit = groundRay.intersectObject(trackMesh);
+            
+            // Checa contra todos os objetos da cena
+            const groundIntersects = groundRay.intersectObjects(scene.children, true);
+            const groundHit = groundIntersects.find(intersect => !isChildOf(intersect.object, car));
 
-            if (groundHit.length > 0) {
-                const groundY = groundHit[0].point.y;
+            if (groundHit) {
+                const groundY = groundHit.point.y;
+                // Gruda o carro no chão
                 if (car.position.y < groundY + 0.1) {
                     car.position.y = groundY + 0.1;
                 } else {
-                    car.position.y -= 0.2; // Velocidade de queda
+                    car.position.y -= 0.2; // Gravidade
                 }
             } else {
-                car.position.y -= 0.5; // Cai se sair da pista
+                car.position.y -= 0.5; // Cai se sair do mapa
             }
 
-            // --- PAREDES (6 SENSORES) ---
-            // Criamos radares na frente, lados e diagonais para o carro não atravessar nada
-            const rayDirections = [
-                new THREE.Vector3(0, 0, 1),    // Frente
-                new THREE.Vector3(1, 0, 0),    // Direita
-                new THREE.Vector3(-1, 0, 0),   // Esquerda
-                new THREE.Vector3(0.5, 0, 0.5),// Diag Dir
-                new THREE.Vector3(-0.5, 0, 0.5)// Diag Esq
+            // 2. LASERS DE PAREDE (Para não atravessar muretas)
+            const directions = [
+                new THREE.Vector3(0, 0, 1),   // Frente
+                new THREE.Vector3(0.7, 0, 0.7), // Diag Direita
+                new THREE.Vector3(-0.7, 0, 0.7) // Diag Esquerda
             ];
 
-            rayDirections.forEach(dir => {
+            directions.forEach(dir => {
                 const wallRay = new THREE.Raycaster();
                 const rotatedDir = dir.clone().applyQuaternion(car.quaternion);
                 wallRay.set(car.position, rotatedDir);
-                // Alcance do radar de parede
-                wallRay.far = 2.5; 
-                
-                const wallHit = wallRay.intersectObject(trackMesh);
-                if (wallHit.length > 0) {
-                    // Se bater, o carro para e é empurrado levemente para trás
-                    speed *= -0.5; 
-                    car.position.add(wallHit[0].face.normal.multiplyScalar(0.2));
+                wallRay.far = 2.5; // Distância do sensor
+
+                const wallIntersects = wallRay.intersectObjects(scene.children, true);
+                const wallHit = wallIntersects.find(intersect => !isChildOf(intersect.object, car));
+
+                if (wallHit) {
+                    speed *= -0.6; // Bate e volta
+                    // Empurra o carro para fora da parede com força
+                    const pushBack = wallHit.face.normal.clone().multiplyScalar(0.3);
+                    car.position.add(pushBack);
                 }
             });
 
-            // Se cair demais, reseta
-            if (car.position.y < -20) resetCar();
+            if (car.position.y < -30) resetCar();
+        }
+
+        // Função essencial para o carro não colidir com ele mesmo
+        function isChildOf(object, parent) {
+            while (object !== null) {
+                if (object === parent) return true;
+                object = object.parent;
+            }
+            return false;
         }
 
         function animate() {
