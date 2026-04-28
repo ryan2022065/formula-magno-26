@@ -24,17 +24,16 @@
         }
     </script>
 
-    <script type="module">
+   <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
-        let camera, scene, renderer, car;
-        let trackMeshes = []; // Lista de partes sólidas da pista
+        let camera, scene, renderer, car, track;
         let speed = 0, angle = 0, cameraMode = 'cockpit';
         const keys = { w: false, a: false, s: false, d: false };
 
-        const spawnPoint = new THREE.Vector3(153, 20, -176); // Nasce bem alto para não bugar
+        const spawnPoint = { x: 153, y: 15, z: -176 }; 
 
         init();
 
@@ -42,111 +41,117 @@
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x87CEEB);
 
-            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 4000);
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 5000);
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
             document.body.appendChild(renderer.domElement);
 
-            scene.add(new THREE.AmbientLight(0xffffff, 1));
+            scene.add(new THREE.AmbientLight(0xffffff, 1.5));
             const sun = new THREE.DirectionalLight(0xffffff, 2);
-            sun.position.set(100, 200, 100);
+            sun.position.set(50, 100, 50);
             scene.add(sun);
 
+            const dracoLoader = new DRACOLoader();
+            dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
             const loader = new GLTFLoader();
-            const draco = new DRACOLoader();
-            draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-            loader.setDRACOLoader(draco);
+            loader.setDRACOLoader(dracoLoader);
 
-            // Carrega Pista
             loader.load('japan.glb', (gltf) => {
-                scene.add(gltf.scene);
-                gltf.scene.traverse(child => {
-                    if (child.isMesh) trackMeshes.push(child);
+                track = gltf.scene;
+                scene.add(track);
+                
+                loader.load('carro.glb', (carGltf) => {
+                    car = carGltf.scene;
+                    resetCar();
+                    scene.add(car);
+                    animate();
                 });
-                console.log("Pista pronta!");
             });
 
-            // Carrega Carro
-            loader.load('carro.glb', (gltf) => {
-                car = gltf.scene;
-                resetCar();
-                scene.add(car);
-                animate(); // Só começa a animar quando o carro existe
-            });
-
-            window.addEventListener('keydown', e => { if(e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = true; });
-            window.addEventListener('keyup', e => { if(e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = false; });
-            window.addEventListener('keydown', e => {
-                if(e.key.toLowerCase() === 'r') resetCar();
-                if(e.key.toLowerCase() === 'c') cameraMode = (cameraMode === 'cockpit') ? 'wing' : 'cockpit';
-            });
+            window.onkeydown = (e) => { 
+                const k = e.key.toLowerCase();
+                if(k in keys) keys[k] = true;
+                if(k === 'r') resetCar();
+                if(k === 'c') cameraMode = (cameraMode === 'cockpit') ? 'wing' : 'cockpit';
+            };
+            window.onkeyup = (e) => { if(e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = false; };
         }
 
         function resetCar() {
             if (car) {
-                car.position.copy(spawnPoint);
-                speed = 0; car.rotation.set(0,0,0); angle = 0;
+                car.position.set(spawnPoint.x, spawnPoint.y, spawnPoint.z);
+                speed = 0; angle = 0; car.rotation.set(0, 0, 0);
             }
         }
 
         function updatePhysics() {
-            if (!car || trackMeshes.length === 0) return;
+            if (!car || !track) return;
 
-            // --- COLISÃO COM O CHÃO ---
-            const ray = new THREE.Raycaster(new THREE.Vector3(car.position.x, car.position.y + 1, car.position.z), new THREE.Vector3(0, -1, 0));
-            const hits = ray.intersectObjects(trackMeshes);
-
-            if (hits.length > 0) {
-                const groundY = hits[0].point.y;
-                if (car.position.y < groundY + 0.2) {
-                    car.position.y = groundY + 0.2;
-                } else {
-                    car.position.y -= 0.2; // Gravidade
-                }
+            // 1. CHÃO (Laser vindo de cima)
+            const groundRay = new THREE.Raycaster(new THREE.Vector3(car.position.x, car.position.y + 2, car.position.z), new THREE.Vector3(0, -1, 0));
+            const groundHits = groundRay.intersectObject(track, true);
+            if (groundHits.length > 0) {
+                let groundY = groundHits[0].point.y;
+                if (car.position.y < groundY + 0.1) car.position.y = groundY + 0.1;
+                else car.position.y -= 0.15;
             } else {
-                car.position.y -= 0.5; // Cai se sair da pista
+                car.position.y -= 0.5;
             }
 
-            // --- COLISÃO COM PAREDES (SIMPLIFICADA E EFICIENTE) ---
-            const wallRay = new THREE.Raycaster(car.position, new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle)), 0, 2);
-            const wallHits = wallRay.intersectObjects(trackMeshes);
+            // 2. PAREDES (Laser alto para não bater no asfalto)
+            const wallOrigin = new THREE.Vector3(car.position.x, car.position.y + 0.6, car.position.z);
+            const wallDir = new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle));
+            const wallRay = new THREE.Raycaster(wallOrigin, wallDir, 0, 2.2);
+            const wallHits = wallRay.intersectObject(track, true);
+
             if (wallHits.length > 0) {
-                speed *= -0.5; // Bate e volta
+                // Só trava se for inclinado (parede)
+                if (Math.abs(wallHits[0].face.normal.y) < 0.6) {
+                    speed *= -0.5;
+                    car.position.add(wallHits[0].face.normal.multiplyScalar(0.1));
+                }
             }
-
             if (car.position.y < -50) resetCar();
         }
 
         function animate() {
             requestAnimationFrame(animate);
 
-            if (keys.w) speed += 0.015;
-            else if (keys.s) speed -= 0.02;
-            else speed *= 0.98;
+            if (car) {
+                if (keys.w) speed += 0.015;
+                else if (keys.s) speed -= 0.02;
+                else speed *= 0.98;
 
-            speed = Math.max(-0.4, Math.min(speed, 2.2));
+                speed = Math.max(-0.4, Math.min(speed, 2.2));
 
-            if (Math.abs(speed) > 0.01) {
-                if (keys.a) angle += 0.04;
-                if (keys.d) angle -= 0.04;
+                if (Math.abs(speed) > 0.01) {
+                    if (keys.a) angle += 0.04;
+                    if (keys.d) angle -= 0.04;
+                }
+
+                car.rotation.y = angle;
+                car.position.x += Math.sin(angle) * speed;
+                car.position.z += Math.cos(angle) * speed;
+
+                updatePhysics();
+
+                // --- CORREÇÃO DA CÂMERA (Como estava antes) ---
+                if (cameraMode === 'cockpit') {
+                    // Câmera dentro do carro olhando para frente
+                    const cockpitOffset = new THREE.Vector3(0, 0.8, -0.2).applyQuaternion(car.quaternion);
+                    camera.position.copy(car.position).add(cockpitOffset);
+                    const lookAtTarget = car.position.clone().add(new THREE.Vector3(Math.sin(angle) * 10, 0.5, Math.cos(angle) * 10));
+                    camera.lookAt(lookAtTarget);
+                } else {
+                    // Câmera seguindo por trás (Wing)
+                    const wingOffset = new THREE.Vector3(-Math.sin(angle) * 4.5, 1.6, -Math.cos(angle) * 4.5);
+                    camera.position.copy(car.position).add(wingOffset);
+                    camera.lookAt(car.position.clone().add(new THREE.Vector3(0, 0.5, 0)));
+                }
+
+                document.getElementById('speed').innerText = Math.floor(speed * 160) + " KM/H";
             }
-
-            car.rotation.y = angle;
-            car.position.x += Math.sin(angle) * speed;
-            car.position.z += Math.cos(angle) * speed;
-
-            updatePhysics();
-
-            // Câmera e UI
-            const offset = cameraMode === 'cockpit' ? new THREE.Vector3(0, 0.8, 0.2) : new THREE.Vector3(0, 1.5, -4);
-            camera.position.copy(car.position).add(offset.applyQuaternion(car.quaternion));
-            camera.lookAt(car.position);
-
-            document.getElementById('gps').innerText = `X: ${Math.floor(car.position.x)} Z: ${Math.floor(car.position.z)}`;
-            document.getElementById('speedometer').innerText = `${Math.floor(speed * 180)} KM/H`;
-
             renderer.render(scene, camera);
         }
     </script>
-</body>
-</html>
