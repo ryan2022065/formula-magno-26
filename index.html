@@ -45,8 +45,8 @@
         let cameraMode = 'cockpit'; 
         const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false };
 
-        // --- AJUSTE O SPAWNPOINT AQUI DEPOIS DE USAR O GPS ---
-        const spawnPoint = new THREE.Vector3(0, 10, 0); 
+       // --- CONFIGURAÇÃO DO SPAWNPOINT (RETA PRINCIPAL) ---
+        const spawnPoint = new THREE.Vector3(153, 10, -176);
 
         function init() {
             scene = new THREE.Scene();
@@ -69,13 +69,18 @@
             const loader = new GLTFLoader();
             loader.setDRACOLoader(dracoLoader);
 
-            loader.load('japan.glb', (gltf) => {
-                const track = gltf.scene;
-                track.traverse((child) => {
-                    if (child.isMesh) child.geometry.computeBoundsTree();
-                });
-                scene.add(track);
-            });
+            let trackMesh; // Adicione esta variável lá no topo com os outros 'let'
+
+loader.load('japan.glb', (gltf) => {
+    const track = gltf.scene;
+    track.traverse((child) => {
+        if (child.isMesh) {
+            child.geometry.computeBoundsTree();
+            trackMesh = child; // Importante para as paredes!
+        }
+    });
+    scene.add(track);
+});
 
             loader.load('carro.glb', (gltf) => {
                 car = gltf.scene;
@@ -110,29 +115,50 @@
             return false;
         }
 
-        function updatePhysics() {
-            if (!car) return;
+       function updatePhysics() {
+    if (!car || !trackMesh) return;
 
-            const raycaster = new THREE.Raycaster();
-            raycaster.set(new THREE.Vector3(car.position.x, car.position.y + 2, car.position.z), new THREE.Vector3(0, -1, 0));
+    // --- 1. GRUDE TOTAL NO CHÃO ---
+    const groundRay = new THREE.Raycaster();
+    groundRay.set(new THREE.Vector3(car.position.x, car.position.y + 1, car.position.z), new THREE.Vector3(0, -1, 0));
+    const groundHit = groundRay.intersectObject(trackMesh);
 
-            const intersects = raycaster.intersectObjects(scene.children, true);
-            const hit = intersects.find(intersect => !isChildOf(intersect.object, car));
-
-            if (hit) {
-                const groundY = hit.point.y;
-                if (car.position.y < groundY + 0.1) {
-                    car.position.y = groundY + 0.1;
-                } else {
-                    car.position.y -= 0.15;
-                }
-            } else {
-                car.position.y -= 0.5;
-            }
-
-            if (car.position.y < -50) resetCar();
+    if (groundHit.length > 0) {
+        const dist = groundHit[0].distance;
+        // Se estiver perto do asfalto, ele "puxa" o carro para baixo (1.0 é a altura do eixo do carro)
+        if (dist < 1.2) {
+            car.position.y -= (dist - 1.0); 
+        } else {
+            car.position.y -= 0.2; // Gravidade se pular
         }
+    }
 
+    // --- 2. SISTEMA ANTI-ATRAVESSAR PAREDES ---
+    // Criamos 3 sensores: Frente, Esquerda e Direita
+    const directions = [
+        new THREE.Vector3(0, 0, 1),   // Sensor Frente
+        new THREE.Vector3(1, 0, 0.5), // Sensor Diagonal Direita
+        new THREE.Vector3(-1, 0, 0.5) // Sensor Diagonal Esquerda
+    ];
+
+    directions.forEach(dir => {
+        const ray = new THREE.Raycaster();
+        // Faz o sensor girar junto com o bico do carro
+        const rotatedDir = dir.clone().applyQuaternion(car.quaternion);
+        ray.set(car.position, rotatedDir);
+        
+        const collision = ray.intersectObject(trackMesh);
+
+        // Se detectar parede a menos de 1.5 metros
+        if (collision.length > 0 && collision[0].distance < 1.5) {
+            speed *= -0.5; // O carro "bate" e perde velocidade
+            // Empurra o carro para fora da parede usando a "normal" da face que ele bateu
+            car.position.add(collision[0].face.normal.multiplyScalar(0.1));
+        }
+    });
+
+    if (car.position.y < -50) resetCar();
+}
         function animate() {
             requestAnimationFrame(animate);
 
